@@ -82,6 +82,22 @@ class EngineTests(unittest.TestCase):
         self.assertIn(result.move, board.legal_moves)
         self.assertLessEqual(result.nodes, 2_000)
 
+    def test_preferred_move_is_played_when_close_enough(self):
+        board = chess.Board(POSITIONS["apertura"])
+        result = self.engine.choose_move(board, preferred=chess.Move.from_uci("a7a6"), tolerance=200)
+        self.assertEqual(board.san(result.move), "a6")
+
+    def test_preferred_move_is_rejected_when_it_loses_material(self):
+        # Ignorar la dama colgada de d4 es mucho peor que tomarla.
+        board = chess.Board("r1bqkbnr/pppppppp/2n5/8/3Q4/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1")
+        result = self.engine.choose_move(board, preferred=chess.Move.from_uci("a7a6"), tolerance=200)
+        self.assertEqual(board.san(result.move), "Nxd4")
+
+    def test_illegal_preferred_move_is_ignored(self):
+        board = chess.Board(POSITIONS["apertura"])
+        result = self.engine.choose_move(board, preferred=chess.Move.from_uci("e2e4"), tolerance=10_000)
+        self.assertIn(result.move, board.legal_moves)
+
 
 class EvaluationTests(unittest.TestCase):
     def test_start_position_is_balanced(self):

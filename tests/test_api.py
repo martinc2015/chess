@@ -67,5 +67,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/game").get_json(), state)
 
 
+class DefaultEngineTests(unittest.TestCase):
+    def test_computer_answers_e4_with_the_caro_kann(self):
+        client = create_app().test_client()
+        data = client.post("/api/game/move", json={"uci": "e2e4", "fen": START_FEN}).get_json()
+        self.assertEqual(data["engine_move"]["san"], "c6")
+        self.assertTrue(data["engine_move"]["search"]["book"])
+        data = client.post("/api/game/move", json={"uci": "d2d4", "fen": data["fen"]}).get_json()
+        self.assertEqual(data["engine_move"]["san"], "d5")
+
+
 if __name__ == "__main__":
     unittest.main()

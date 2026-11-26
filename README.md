@@ -1,7 +1,8 @@
 # Chess Clone
 
 Partida de ajedrez individual contra la computadora, en el navegador.
-El usuario juega siempre con **blancas** y la computadora con **negras**.
+El usuario juega siempre con **blancas** y la computadora con **negras**,
+que abre siempre con la **defensa Caro-Kann**.
 
 Proyecto personal: el objetivo a futuro es un motor que juegue imitando un
 estilo propio. Esta etapa incluye un motor básico (minimax con poda alfa-beta).
@@ -13,7 +14,17 @@ estilo propio. Esta etapa incluye un motor básico (minimax con poda alfa-beta).
 
 ## Cómo ejecutarlo
 
-En PowerShell, desde la carpeta del proyecto:
+**Con doble click (Windows):** `Abrir Chess Clone.bat` arranca el servidor en
+segundo plano, sin ventana, y abre el navegador. La ventana negra se cierra
+sola en un par de segundos y el juego sigue funcionando. Si ya estaba abierto,
+solo abre otra pestaña. La primera vez crea `.venv` e instala las dependencias
+si hace falta.
+
+Para apagar el servidor: `Cerrar Chess Clone.bat`. Solo cierra el proceso si
+en el puerto 5000 responde Chess Clone. El registro del servidor queda en
+`%TEMP%\chess-clone.err.log`.
+
+**A mano**, en PowerShell, desde la carpeta del proyecto:
 
 ```powershell
 python -m venv .venv
@@ -47,6 +58,7 @@ app.py                  API Flask (solo capa HTTP)
 game/state.py           Estado de la partida y reglas (python-chess)
 engine/search.py        Búsqueda minimax / alfa-beta con límites de tiempo y nodos
 engine/evaluation.py    Evaluación de posiciones
+engine/caro_kann.py     Apertura fija: libro de la Caro-Kann
 templates/index.html    Página (Jinja2)
 static/css/style.css    Estilos
 static/js/board.js      Componente del tablero (dibujo, interacción, FEN, UCI)
@@ -81,7 +93,7 @@ Respuesta (también la de `GET /api/game` y `reset`, sin `user_move`/`engine_mov
 
 ```json
 {
-  "fen": "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+  "fen": "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
   "turn": "white",
   "user_color": "white",
   "status": "in_progress",
@@ -91,12 +103,15 @@ Respuesta (también la de `GET /api/game` y `reset`, sin `user_move`/`engine_mov
   "winner": null,
   "termination": null,
   "legal_moves": ["a2a3", "a2a4", "..."],
-  "last_move": {"uci": "d7d5", "san": "d5", "color": "black"},
+  "last_move": {"uci": "c7c6", "san": "c6", "color": "black"},
   "user_move": {"uci": "e2e4", "san": "e4", "color": "white"},
-  "engine_move": {"uci": "d7d5", "san": "d5", "color": "black",
-                  "search": {"depth": 4, "nodes": 10706, "time_ms": 230.0, "score": -43}}
+  "engine_move": {"uci": "c7c6", "san": "c6", "color": "black",
+                  "search": {"depth": 0, "nodes": 0, "time_ms": 0.1, "score": -60, "book": true}}
 }
 ```
+
+`search.book` es `true` cuando la jugada sale del libro de aperturas (sin
+búsqueda: `depth` y `nodes` en 0); si no, `depth`/`nodes` son los de la búsqueda.
 
 - `status`: `in_progress`, `checkmate`, `stalemate` o `draw`.
 - `result`: `1-0`, `0-1`, `1/2-1/2` o `null`. `termination` indica la causa
@@ -117,6 +132,22 @@ Respuesta (también la de `GET /api/game` y `reset`, sin `user_move`/`engine_mov
   0,7 s y 100 000 nodos. Si se agota el tiempo devuelve la mejor jugada
   encontrada hasta ese momento.
 - Entre jugadas de igual valor elige al azar, para que no juegue siempre igual.
+
+### Apertura: siempre Caro-Kann
+
+`CaroKannEngine` (`engine/caro_kann.py`) es el motor que usa la partida:
+
+- Contra 1.e4 sigue un libro con las líneas principales de la Caro-Kann
+  (1...c6 2...d5 y la respuesta habitual en la clásica, avance, cambio, Panov,
+  fantasía, dos caballos, ataque indio de rey...). Las jugadas de libro son
+  instantáneas.
+- Contra cualquier otra primera jugada responde 1...c6 y después busca ...d5.
+  Si las blancas juegan e4 más tarde, transpone a la Caro-Kann.
+- ...d5 fuera del libro solo se juega si la búsqueda no la ve más de 50
+  centipeones peor que la mejor jugada, para no regalar material.
+- El libro está indexado por posición, así que reconoce transposiciones
+  (1.d4 c6 2.e4 se responde 2...d5). Para sumar líneas, se agregan a `LINES`.
+- Cuando se termina el libro, decide la búsqueda de siempre.
 
 Juega un ajedrez básico: gana a un principiante pero comete errores
 posicionales, porque solo mira 3–4 jugadas hacia adelante.

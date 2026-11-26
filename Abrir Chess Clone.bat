@@ -1,17 +1,17 @@
 @echo off
 rem Chess Clone - doble click para jugar.
-rem Levanta el servidor y abre el navegador. Cerrar esta ventana apaga el servidor.
+rem Arranca el servidor en segundo plano (sin ventana) y abre el navegador.
+rem Esta ventana se cierra sola; el juego sigue funcionando.
+rem Para apagar el servidor: "Cerrar Chess Clone.bat".
 
 title Chess Clone
 cd /d "%~dp0"
 set "URL=http://127.0.0.1:5000"
-set "PY=.venv\Scripts\python.exe"
+set "PY=%CD%\.venv\Scripts\python.exe"
+set "LOG=%TEMP%\chess-clone"
 
 rem Si ya esta corriendo, solo abre el navegador.
-curl.exe -sf -o nul --max-time 1 %URL%/api/health && (
-    start "" %URL%
-    exit /b
-)
+call :running && goto :open
 
 rem Primera vez (o entorno roto): crea el entorno e instala dependencias.
 if not exist "%PY%" (
@@ -23,17 +23,37 @@ if not exist "%PY%" (
     "%PY%" -m pip install -r requirements.txt || goto :error
 )
 
-rem Abre el navegador apenas el servidor responda.
-start "" /b powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; for($i=0;$i -lt 60;$i++){try{Invoke-WebRequest -UseBasicParsing '%URL%/api/health' -TimeoutSec 1 | Out-Null; Start-Process '%URL%'; break}catch{Start-Sleep -Milliseconds 500}}"
+rem Servidor oculto: no depende de esta ventana.
+echo Iniciando Chess Clone...
+powershell -NoProfile -Command "Start-Process -FilePath '%PY%' -ArgumentList '-m','flask','--app','app','run','--host','127.0.0.1','--port','5000' -WorkingDirectory '%CD%' -WindowStyle Hidden -RedirectStandardOutput '%LOG%.out.log' -RedirectStandardError '%LOG%.err.log'"
 
-echo Chess Clone corriendo en %URL%
-echo Cerra esta ventana para apagar el servidor.
+rem Espera hasta 30 s a que responda.
+set /a tries=0
+:wait
+call :running && goto :open
+set /a tries+=1
+if %tries% geq 30 goto :failed
+ping -n 2 127.0.0.1 >nul
+goto :wait
+
+:open
+start "" %URL%
+exit /b 0
+
+:running
+curl.exe -sf -o nul --max-time 1 %URL%/api/health >nul 2>&1
+exit /b %errorlevel%
+
+:failed
 echo.
-"%PY%" app.py
+echo Chess Clone no arranco. Detalle del error:
+echo.
+type "%LOG%.err.log"
 pause
-exit /b
+exit /b 1
 
 :error
 echo.
 echo No se pudo preparar el entorno. Revisa que Python este instalado.
 pause
+exit /b 1

@@ -49,6 +49,7 @@ class SearchResult:
     depth: int      # última profundidad completada
     nodes: int
     time_ms: float
+    book: bool = False  # jugada de libro de aperturas (sin búsqueda)
 
     def as_dict(self) -> dict:
         return {
@@ -56,6 +57,7 @@ class SearchResult:
             "nodes": self.nodes,
             "time_ms": round(self.time_ms, 1),
             "score": self.score,
+            "book": self.book,
         }
 
 
@@ -76,18 +78,33 @@ class Engine:
         self.quiescence_depth = quiescence_depth
         self._rng = random.Random(seed)
 
-    def choose_move(self, board: chess.Board) -> SearchResult:
+    def choose_move(
+        self,
+        board: chess.Board,
+        preferred: chess.Move | None = None,
+        tolerance: int = 0,
+    ) -> SearchResult:
+        """Elige la jugada para el bando al que le toca mover.
+
+        Con `preferred`, juega esa jugada salvo que otra sea mejor por más de
+        `tolerance` centipeones. Se explora primero, así su valor es exacto.
+        """
         start = time.perf_counter()
         search = _Search(board, start + self.time_limit, self.node_limit, self.quiescence_depth)
 
         moves = list(search.board.legal_moves)
         if not moves:
             return SearchResult(None, 0, 0, 0, (time.perf_counter() - start) * 1000)
+        if preferred not in moves:
+            preferred = None
 
         # Mezclar antes de ordenar: entre jugadas equivalentes, la elección varía.
         self._rng.shuffle(moves)
         moves = search.order(moves, 0)
+        if preferred is not None:
+            _to_front(moves, preferred)
         best_move, best_score, depth_done = moves[0], 0, 0
+        preferred_score = None
 
         if len(moves) > 1:
             for depth in range(1, self.max_depth + 1):
@@ -96,17 +113,32 @@ class Engine:
                 except _Timeout:
                     if search.root_best is not None:
                         best_move, best_score = search.root_best
+                        preferred_score = search.root_first
                     break
                 best_move, best_score, depth_done = move, score, depth
-                moves.remove(move)
-                moves.insert(0, move)  # la mejor jugada se explora primero en la siguiente iteración
+                preferred_score = search.root_first
+                _to_front(moves, move)  # la mejor jugada se explora primero en la siguiente iteración
+                if preferred is not None:
+                    _to_front(moves, preferred)
                 if abs(score) >= MATE_SCORE - _MAX_PLY:
                     break  # mate encontrado: no hace falta buscar más profundo
                 if time.perf_counter() - start > self.time_limit * 0.4:
                     break  # la siguiente iteración casi seguro no terminaría a tiempo
 
+        if (
+            preferred is not None
+            and preferred_score is not None
+            and preferred_score >= best_score - tolerance
+        ):
+            best_move, best_score = preferred, preferred_score
+
         elapsed_ms = (time.perf_counter() - start) * 1000
         return SearchResult(best_move, best_score, depth_done, search.nodes, elapsed_ms)
+
+
+def _to_front(moves: list[chess.Move], move: chess.Move) -> None:
+    moves.remove(move)
+    moves.insert(0, move)
 
 
 class _Search:
@@ -124,11 +156,13 @@ class _Search:
         self.killers: list[list[chess.Move | None]] = [[None, None] for _ in range(_MAX_PLY)]
         self.history: dict[tuple[int, int], int] = {}
         self.root_best: tuple[chess.Move, int] | None = None
+        self.root_first: int | None = None  # valor exacto de la primera jugada de la raíz
 
     # ---- Raíz ------------------------------------------------------------
 
     def root(self, moves: list[chess.Move], depth: int) -> tuple[chess.Move, int]:
         self.root_best = None
+        self.root_first = None
         alpha, beta = -INFINITY, INFINITY
         best_move, best_score = moves[0], -INFINITY
         board = self.board
@@ -136,6 +170,8 @@ class _Search:
             board.push(move)
             score = -self._negamax(depth - 1, -beta, -alpha, 1)
             board.pop()
+            if self.root_first is None:
+                self.root_first = score  # ventana completa: el valor es exacto
             if score > best_score:
                 best_move, best_score = move, score
                 self.root_best = (move, score)

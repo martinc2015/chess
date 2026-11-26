@@ -10,7 +10,7 @@ JSON a llamadas sobre la partida. Las responsabilidades están separadas:
 
 from flask import Blueprint, Flask, current_app, jsonify, render_template, request
 
-from engine import Engine
+from engine import CaroKannEngine, Engine
 from game import START_FEN, Game, MoveError
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -68,8 +68,9 @@ def _error(err: MoveError):
 
 
 def create_app(engine: Engine | None = None) -> Flask:
+    """Por defecto la computadora juega con `CaroKannEngine` (siempre Caro-Kann)."""
     app = Flask(__name__)
-    app.extensions["chess_game"] = Game(engine or Engine())
+    app.extensions["chess_game"] = Game(engine or CaroKannEngine())
     app.register_blueprint(api)
 
     @app.get("/")
